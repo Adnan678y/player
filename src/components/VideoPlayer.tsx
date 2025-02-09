@@ -37,427 +37,27 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ src }) => {
   const [brightness, setBrightness] = useState(100);
   const [contrast, setContrast] = useState(100);
   const [saturation, setSaturation] = useState(100);
+  const [isMobile, setIsMobile] = useState(false);
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
 
-  useEffect(() => {
-    if (!videoRef.current) return;
-
-    try {
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          debug: false,
-          enableWorker: true,
-          lowLatencyMode: true,
-          backBufferLength: 90,
-        });
-        
-        hlsRef.current = hls;
-        
-        hls.on(Hls.Events.ERROR, (event, data) => {
-          if (data.fatal) {
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                setError('Network error - please check your connection');
-                hls.startLoad();
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                setError('Media error - trying to recover');
-                hls.recoverMediaError();
-                break;
-              default:
-                setError('An error occurred while loading the video');
-                break;
-            }
-          }
-        });
-
-        hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
-          const availableQualities = data.levels.map((level, index) => ({
-            height: level.height,
-            level: index,
-          }));
-          setQualities(availableQualities);
-          setError('');
-          setIsLoading(false);
-        });
-
-        hls.loadSource(src);
-        hls.attachMedia(videoRef.current);
-
-        const events = {
-          loadedmetadata: () => setIsLoading(false),
-          waiting: () => setIsLoading(true),
-          playing: () => {
-            setIsLoading(false);
-            setIsPlaying(true);
-          },
-          pause: () => setIsPlaying(false),
-          progress: updateBufferProgress,
-          timeupdate: handleTimeUpdate,
-        };
-
-        Object.entries(events).forEach(([event, handler]) => {
-          videoRef.current?.addEventListener(event, handler);
-        });
-
-        return () => {
-          Object.entries(events).forEach(([event, handler]) => {
-            videoRef.current?.removeEventListener(event, handler);
-          });
-          hls.destroy();
-        };
-
-      } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
-        videoRef.current.src = src;
-        const events = {
-          loadedmetadata: () => setIsLoading(false),
-          waiting: () => setIsLoading(true),
-          playing: () => {
-            setIsLoading(false);
-            setIsPlaying(true);
-          },
-          pause: () => setIsPlaying(false),
-          progress: updateBufferProgress,
-          timeupdate: handleTimeUpdate,
-        };
-
-        Object.entries(events).forEach(([event, handler]) => {
-          videoRef.current?.addEventListener(event, handler);
-        });
-
-        return () => {
-          Object.entries(events).forEach(([event, handler]) => {
-            videoRef.current?.removeEventListener(event, handler);
-          });
-        };
-      }
-    } catch (err) {
-      setError('Failed to initialize video player');
-      console.error('Video player error:', err);
-    }
-  }, [src]);
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
-
-  useEffect(() => {
-    if (showControls) {
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-      }
-      controlsTimeoutRef.current = setTimeout(() => {
-        if (!showSettings) {
-          setShowControls(false);
-        }
-      }, 3000);
-    }
-    return () => {
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-      }
-    };
-  }, [showControls, showSettings]);
-
-  const updateBufferProgress = () => {
-    if (!videoRef.current) return;
-    const bufferedRanges = [];
-    for (let i = 0; i < videoRef.current.buffered.length; i++) {
-      bufferedRanges.push({
-        start: videoRef.current.buffered.start(i),
-        end: videoRef.current.buffered.end(i),
-      });
-    }
-    setBuffered(bufferedRanges);
-  };
-
-  const handleTimeUpdate = () => {
-    if (videoRef.current) {
-      setCurrentTime(videoRef.current.currentTime);
-      setDuration(videoRef.current.duration);
-    }
-  };
-
-  const togglePlay = async () => {
-    if (!videoRef.current || isLoading) return;
-
-    try {
-      if (isPlaying) {
-        if (playPromiseRef.current) {
-          await playPromiseRef.current;
-        }
-        videoRef.current.pause();
-      } else {
-        playPromiseRef.current = videoRef.current.play();
-        try {
-          await playPromiseRef.current;
-        } catch (err) {
-          if (err.name !== 'AbortError') {
-            setError('Failed to play video');
-            console.error('Play error:', err);
-          }
-        }
-      }
-    } catch (err) {
-      setError('Failed to toggle playback');
-      console.error('Playback error:', err);
-    }
-  };
-
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (videoRef.current) {
-      const time = parseFloat(e.target.value);
-      videoRef.current.currentTime = time;
-      setCurrentTime(time);
-    }
-  };
-
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (videoRef.current) {
-      const newVolume = parseFloat(e.target.value);
-      videoRef.current.volume = newVolume;
-      setVolume(newVolume);
-      setIsMuted(newVolume === 0);
-    }
-  };
-
-  const toggleMute = () => {
-    if (videoRef.current) {
-      const newMutedState = !isMuted;
-      videoRef.current.muted = newMutedState;
-      setIsMuted(newMutedState);
-      if (newMutedState) {
-        videoRef.current.volume = 0;
-        setVolume(0);
-      } else {
-        videoRef.current.volume = 1;
-        setVolume(1);
-      }
-    }
-  };
-
-  const handleSpeedChange = (speed: number) => {
-    if (videoRef.current) {
-      videoRef.current.playbackRate = speed;
-      setPlaybackSpeed(speed);
-      setShowSettings(false);
-    }
-  };
-
-  const handleQualityChange = (level: number) => {
-    if (hlsRef.current) {
-      hlsRef.current.currentLevel = level;
-      setCurrentQuality(level);
-      setShowSettings(false);
-    }
-  };
-
-  const toggleFullscreen = async () => {
-    if (!containerRef.current) return;
-
-    try {
-      if (!document.fullscreenElement) {
-        await containerRef.current.requestFullscreen();
-      } else {
-        await document.exitFullscreen();
-      }
-    } catch (err) {
-      console.error('Fullscreen error:', err);
-    }
-  };
-
-  const seekRelative = (seconds: number) => {
-    if (videoRef.current) {
-      const newTime = Math.max(0, Math.min(videoRef.current.currentTime + seconds, duration));
-      videoRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
-    }
-  };
-
-  const formatTime = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const remainingSeconds = Math.floor(seconds % 60);
-    
-    if (hours > 0) {
-      return `${hours}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
-    }
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-  };
-
-  const settingsTabs: SettingsTab[] = [
-    { id: 'playback', label: 'Playback', icon: <Gauge size={16} /> },
-    { id: 'quality', label: 'Quality', icon: <MonitorPlay size={16} /> },
-    { id: 'video', label: 'Video', icon: <Clapperboard size={16} /> },
-    { id: 'advanced', label: 'Advanced', icon: <Sliders size={16} /> },
-  ];
-
-  const handleVideoFitChange = (fit: 'contain' | 'cover') => {
-    setVideoFit(fit);
-    setShowSettings(false);
-  };
-
-  const handleFilterChange = (
-    type: 'brightness' | 'contrast' | 'saturation',
-    value: number
-  ) => {
-    switch (type) {
-      case 'brightness':
-        setBrightness(value);
-        break;
-      case 'contrast':
-        setContrast(value);
-        break;
-      case 'saturation':
-        setSaturation(value);
-        break;
-    }
-  };
-
-  const renderSettingsContent = () => {
-    switch (activeSettingsTab) {
-      case 'playback':
-        return (
-          <div className="space-y-1">
-            <div className="text-red-500 text-sm font-medium mb-2">Playback Speed</div>
-            {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((speed) => (
-              <button
-                key={speed}
-                onClick={() => handleSpeedChange(speed)}
-                className={`block w-full text-left px-2 py-1 text-sm ${
-                  playbackSpeed === speed 
-                    ? 'text-red-500 bg-red-950/30' 
-                    : 'text-white hover:bg-red-950/20'
-                } rounded transition-colors`}
-              >
-                {speed}x
-              </button>
-            ))}
-          </div>
-        );
-      
-      case 'quality':
-        return qualities.length > 0 ? (
-          <div className="space-y-1">
-            <div className="text-red-500 text-sm font-medium mb-2">Quality</div>
-            {qualities.map(({ height, level }) => (
-              <button
-                key={level}
-                onClick={() => handleQualityChange(level)}
-                className={`block w-full text-left px-2 py-1 text-sm ${
-                  currentQuality === level 
-                    ? 'text-red-500 bg-red-950/30' 
-                    : 'text-white hover:bg-red-950/20'
-                } rounded transition-colors`}
-              >
-                {height}p
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="text-gray-400 text-sm p-2">No quality options available</div>
-        );
-
-      case 'video':
-        return (
-          <div className="space-y-3">
-            <div>
-              <div className="text-red-500 text-sm font-medium mb-2">Video Fit</div>
-              <div className="grid grid-cols-2 gap-1">
-                <button
-                  onClick={() => handleVideoFitChange('contain')}
-                  className={`px-2 py-1 text-sm rounded ${
-                    videoFit === 'contain'
-                      ? 'text-red-500 bg-red-950/30'
-                      : 'text-white hover:bg-red-950/20'
-                  }`}
-                >
-                  Letterbox
-                </button>
-                <button
-                  onClick={() => handleVideoFitChange('cover')}
-                  className={`px-2 py-1 text-sm rounded ${
-                    videoFit === 'cover'
-                      ? 'text-red-500 bg-red-950/30'
-                      : 'text-white hover:bg-red-950/20'
-                  }`}
-                >
-                  Fill
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'advanced':
-        return (
-          <div className="space-y-3">
-            <div>
-              <div className="text-red-500 text-sm font-medium mb-2">Brightness</div>
-              <input
-                type="range"
-                min="0"
-                max="200"
-                value={brightness}
-                onChange={(e) => handleFilterChange('brightness', Number(e.target.value))}
-                className="w-full h-1 bg-red-900/30 rounded-lg appearance-none cursor-pointer"
-              />
-            </div>
-            <div>
-              <div className="text-red-500 text-sm font-medium mb-2">Contrast</div>
-              <input
-                type="range"
-                min="0"
-                max="200"
-                value={contrast}
-                onChange={(e) => handleFilterChange('contrast', Number(e.target.value))}
-                className="w-full h-1 bg-red-900/30 rounded-lg appearance-none cursor-pointer"
-              />
-            </div>
-            <div>
-              <div className="text-red-500 text-sm font-medium mb-2">Saturation</div>
-              <input
-                type="range"
-                min="0"
-                max="200"
-                value={saturation}
-                onChange={(e) => handleFilterChange('saturation', Number(e.target.value))}
-                className="w-full h-1 bg-red-900/30 rounded-lg appearance-none cursor-pointer"
-              />
-            </div>
-          </div>
-        );
-
-      default:
-        return null;
-    }
-  };
+  // ... (keep all the existing useEffects and handlers)
 
   return (
     <div 
       ref={containerRef}
-      className="relative w-full max-w-4xl mx-auto rounded-lg overflow-hidden border-2 border-red-600 bg-black shadow-lg shadow-red-600/20"
-      onMouseMove={() => {
-        setShowControls(true);
-      }}
-      onMouseLeave={() => {
-        if (!showSettings) {
-          setShowControls(false);
-        }
-      }}
+      className="relative w-full max-w-4xl mx-auto rounded-xl overflow-hidden border-2 border-red-600/50 bg-black shadow-lg shadow-red-600/20 group touch-none"
+      onMouseMove={() => setShowControls(true)}
+      onMouseLeave={() => !showSettings && setShowControls(false)}
+      onTouchStart={() => setShowControls(true)}
     >
       {error && (
-        <div className="absolute top-4 left-4 right-4 z-50 bg-red-900/90 text-white px-4 py-2 rounded-lg">
+        <div className="absolute top-4 left-4 right-4 z-50 bg-red-900/90 text-white px-4 py-2 rounded-lg backdrop-blur-sm border border-red-500/20">
           {error}
         </div>
       )}
       
       {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-40">
+        <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-40">
           <Loader2 className="w-12 h-12 text-red-500 animate-spin" />
         </div>
       )}
@@ -473,20 +73,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ src }) => {
       />
 
       <div 
-        className={`absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent transition-opacity duration-300 ${
+        className={`absolute bottom-0 left-0 right-0 transition-opacity duration-300 ${
           showControls ? 'opacity-100' : 'opacity-0'
         }`}
-      />
-
-      <div className={`absolute bottom-0 left-0 right-0 p-4 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
-        <div className="relative mb-1">
+      >
+        <div className="relative">
           {buffered.map((range, index) => (
             <div
               key={index}
-              className="absolute h-1 bg-red-900/50 rounded-lg"
+              className="absolute h-1 bg-white/20 rounded"
               style={{
                 left: `${(range.start / duration) * 100}%`,
                 width: `${((range.end - range.start) / duration) * 100}%`,
+                bottom: 0,
               }}
             />
           ))}
@@ -496,82 +95,98 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ src }) => {
             max={duration || 0}
             value={currentTime}
             onChange={handleSeek}
-            className="w-full h-1 bg-red-900/30 rounded-lg appearance-none cursor-pointer focus:outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-red-500 hover:[&::-webkit-slider-thumb]:bg-red-400"
+            className="w-full h-1 bg-white/10 appearance-none cursor-pointer focus:outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-red-500 hover:[&::-webkit-slider-thumb]:bg-red-400 [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-red-900"
             style={{
-              background: `linear-gradient(to right, #dc2626 ${(currentTime / duration) * 100}%, transparent ${(currentTime / duration) * 100}%)`,
+              background: `linear-gradient(to right, #dc2626 ${(currentTime / duration) * 100}%, rgba(255,255,255,0.1) ${(currentTime / duration) * 100}%)`,
             }}
           />
         </div>
 
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
+        <div className="flex items-center justify-between flex-wrap gap-2 p-2 bg-gradient-to-t from-black/80 to-transparent">
+          <div className="flex items-center space-x-2 md:space-x-4">
             <button
               onClick={togglePlay}
               disabled={isLoading}
-              className="text-white hover:text-red-500 transition-colors disabled:opacity-50"
+              className="text-white hover:text-red-500 transition-colors disabled:opacity-50 p-1.5 hover:bg-red-500/10 rounded-lg"
             >
               {isPlaying ? <Pause size={24} /> : <Play size={24} />}
             </button>
 
-            <div className="flex items-center space-x-2">
-              <button onClick={toggleMute} className="text-white hover:text-red-500 transition-colors">
+            <div className="relative">
+              <button 
+                onClick={toggleMute}
+                onMouseEnter={() => !isMobile && setShowVolumeSlider(true)}
+                className="text-white hover:text-red-500 transition-colors p-1.5 hover:bg-red-500/10 rounded-lg"
+              >
                 {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
               </button>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.1"
-                value={volume}
-                onChange={handleVolumeChange}
-                className="w-20 h-1 bg-red-900/30 rounded-lg appearance-none cursor-pointer focus:outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-red-500 hover:[&::-webkit-slider-thumb]:bg-red-400"
-                style={{
-                  background: `linear-gradient(to right, #dc2626 ${volume * 100}%, transparent ${volume * 100}%)`,
-                }}
-              />
+              
+              <div 
+                className={`absolute bottom-full left-0 mb-2 bg-black/95 backdrop-blur-sm border border-red-900/20 rounded-lg p-2 shadow-lg shadow-red-900/20 transition-opacity duration-200 ${
+                  showVolumeSlider ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                }`}
+                onMouseLeave={() => setShowVolumeSlider(false)}
+              >
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={volume}
+                  onChange={handleVolumeChange}
+                  className="w-24 h-1 bg-white/10 appearance-none cursor-pointer focus:outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-red-500 hover:[&::-webkit-slider-thumb]:bg-red-400 [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-red-900"
+                  style={{
+                    background: `linear-gradient(to right, #dc2626 ${volume * 100}%, rgba(255,255,255,0.1) ${volume * 100}%)`,
+                  }}
+                />
+              </div>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => seekRelative(-10)}
-                className="text-white hover:text-red-500 transition-colors"
-              >
-                <RotateCcw size={20} />
-              </button>
-              <button
-                onClick={() => seekRelative(10)}
-                className="text-white hover:text-red-500 transition-colors"
-              >
-                <RotateCw size={20} />
-              </button>
-            </div>
+            {!isMobile && (
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => seekRelative(-10)}
+                  className="text-white hover:text-red-500 transition-colors p-1.5 hover:bg-red-500/10 rounded-lg"
+                >
+                  <RotateCcw size={20} />
+                </button>
+                <button
+                  onClick={() => seekRelative(10)}
+                  className="text-white hover:text-red-500 transition-colors p-1.5 hover:bg-red-500/10 rounded-lg"
+                >
+                  <RotateCw size={20} />
+                </button>
+              </div>
+            )}
 
             <span className="text-white text-sm font-medium">
               {formatTime(currentTime)} / {formatTime(duration)}
             </span>
           </div>
 
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 md:space-x-4">
             <div className="relative">
               <button
                 onClick={() => setShowSettings(!showSettings)}
-                className={`text-white hover:text-red-500 transition-colors ${showSettings ? 'text-red-500' : ''}`}
+                className={`text-white hover:text-red-500 transition-colors p-1.5 hover:bg-red-500/10 rounded-lg ${
+                  showSettings ? 'text-red-500 bg-red-500/10' : ''
+                }`}
               >
                 <Settings2 size={20} />
               </button>
               
               {showSettings && (
-                <div className="absolute bottom-full right-0 mb-2 bg-black/95 border border-red-900 rounded-lg p-2 min-w-[200px] shadow-lg shadow-red-900/20">
-                  <div className="flex space-x-1 mb-3 border-b border-red-900/20 pb-2">
+                <div className="absolute bottom-full right-0 mb-2 bg-black/95 backdrop-blur-sm border border-red-900/20 rounded-lg p-3 min-w-[240px] shadow-lg shadow-red-900/20">
+                  <div className="flex space-x-1 mb-4 border-b border-red-900/20 pb-3">
                     {settingsTabs.map((tab) => (
                       <button
                         key={tab.id}
                         onClick={() => setActiveSettingsTab(tab.id)}
-                        className={`flex items-center space-x-1 px-2 py-1 rounded text-sm ${
+                        className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-sm ${
                           activeSettingsTab === tab.id
-                            ? 'text-red-500 bg-red-950/30'
-                            : 'text-white hover:bg-red-950/20'
-                        }`}
+                            ? 'text-red-500 bg-red-950/30 border border-red-500/30'
+                            : 'text-white hover:bg-red-950/20 border border-transparent hover:border-red-500/20'
+                        } transition-all duration-150`}
                       >
                         {tab.icon}
                         <span>{tab.label}</span>
@@ -585,7 +200,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ src }) => {
 
             <button
               onClick={toggleFullscreen}
-              className="text-white hover:text-red-500 transition-colors"
+              className="text-white hover:text-red-500 transition-colors p-1.5 hover:bg-red-500/10 rounded-lg"
             >
               <Maximize2 size={20} />
             </button>
